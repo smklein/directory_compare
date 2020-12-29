@@ -1,0 +1,17 @@
+[package]
+name = "git-tests"
+version = "0.1.0"
+authors = ["Sean Klein <seanmarionklein@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+difference = "2.0.0"
+itertools = "0.10.0"
+tempdir = "0.3.7"
+thiserror = "1.0.23"
+walkdir = "2.3.1"
+
+[dev-dependencies]
+anyhow = "1.0.36"
