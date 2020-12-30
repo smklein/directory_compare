@@ -8,12 +8,19 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use walkdir::{DirEntry, WalkDir};
 
+/// Errors which may be returned from `directory_compare`.
 #[derive(Error, Debug)]
 pub enum DirCompareError {
+    /// An error occurred when walking over either of the
+    /// input directories.
     #[error("Failed to walk over directory tree: {0}")]
     WalkDir(walkdir::Error),
+    /// An entry, requested as part of the expected entry set, was
+    /// not present in one of the directories.
     #[error("Missing Entry {0:#?}")]
     MissingEntry(OsString),
+    /// The type of an entry differed (e.g., "file" vs "directory") for
+    /// a compared path.
     #[error("Mismatched Entry Types: [{:#?}]: {:#?} vs [#{:#?}]: {:#?}",
         .lhs.path(),
         .lhs.file_type(),
@@ -21,8 +28,10 @@ pub enum DirCompareError {
         .rhs.file_type()
     )]
     EntryTypeMismatch { lhs: DirEntry, rhs: DirEntry },
+    /// The contents of a file differ between the compared paths.
     #[error("File contents differ: {0}")]
     ContentsDiffer(String),
+    /// A generic I/O error occurred while accessing the filesystem.
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

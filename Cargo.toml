@@ -1,6 +1,6 @@
 [package]
 name = "directory_compare"
-version = "0.1.2"
+version = "0.1.3"
 authors = ["Sean Klein <seanmarionklein@gmail.com>"]
 description = "Utilities for comparing directory contents"
 repository = "https://github.com/smklein/directory_compare"
