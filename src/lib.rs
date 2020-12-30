@@ -120,6 +120,9 @@ where
 
     for golden in golden_paths {
         let golden_os_str = golden.as_ref().as_os_str();
+
+        // Ignore all non-requested paths, advancing the iterators
+        // past unrelated content.
         let lhs_entry = advance_iter(&mut lhs_iter, golden_os_str)?;
         let rhs_entry = advance_iter(&mut rhs_iter, golden_os_str)?;
 
