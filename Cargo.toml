@@ -1,5 +1,5 @@
 [package]
-name = "git-tests"
+name = "directory_compare"
 version = "0.1.0"
 authors = ["Sean Klein <seanmarionklein@gmail.com>"]
 edition = "2018"

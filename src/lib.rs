@@ -9,7 +9,7 @@ use thiserror::Error;
 use walkdir::{DirEntry, WalkDir};
 
 #[derive(Error, Debug)]
-pub enum PathCompareError {
+pub enum DirCompareError {
     #[error("Failed to walk over directory tree: {0}")]
     WalkDir(walkdir::Error),
     #[error("Missing Entry {0:#?}")]
@@ -39,14 +39,14 @@ struct Entry {
 
 // Move `iter` forward until it returns an entry matching `golden`.
 // Returns the DirEntry which contains `golden`.
-fn advance_iter<I>(iter: &mut Peekable<I>, golden: &OsStr) -> Result<Entry, PathCompareError>
+fn advance_iter<I>(iter: &mut Peekable<I>, golden: &OsStr) -> Result<Entry, DirCompareError>
 where
     I: Iterator<Item = walkdir::Result<Entry>>,
 {
     loop {
         let result = iter
             .peek()
-            .ok_or_else(|| PathCompareError::MissingEntry(golden.to_owned()))?;
+            .ok_or_else(|| DirCompareError::MissingEntry(golden.to_owned()))?;
 
         let item = match result {
             Ok(value) => value,
@@ -59,7 +59,7 @@ where
                 // to continue operating on a non-owned reference, but
                 // permitting the error case to take ownership of the error.
                 let err = iter.next().unwrap().unwrap_err();
-                return Err(PathCompareError::WalkDir(err));
+                return Err(DirCompareError::WalkDir(err));
             }
         };
 
@@ -71,7 +71,7 @@ where
                 return Ok(item.clone());
             }
             Ordering::Greater => {
-                return Err(PathCompareError::MissingEntry(golden.to_owned()));
+                return Err(DirCompareError::MissingEntry(golden.to_owned()));
             }
         }
     }
@@ -107,9 +107,14 @@ where
 /// Compares the selected contents of two directories.
 ///
 /// Checks all requested golden_paths within both directories.
-pub fn path_compare<P, I>(golden_paths: &mut I, lhs: P, rhs: P) -> Result<(), PathCompareError>
+pub fn directory_compare<P, I, P2>(
+    golden_paths: &mut I,
+    lhs: P2,
+    rhs: P2,
+) -> Result<(), DirCompareError>
 where
     P: AsRef<Path> + Ord,
+    P2: AsRef<Path>,
     I: Iterator<Item = P>,
 {
     // Stable ordering is necessary for the following comparison
@@ -127,7 +132,7 @@ where
         let rhs_entry = advance_iter(&mut rhs_iter, golden_os_str)?;
 
         if lhs_entry.dirent.file_type() != rhs_entry.dirent.file_type() {
-            return Err(PathCompareError::EntryTypeMismatch {
+            return Err(DirCompareError::EntryTypeMismatch {
                 lhs: lhs_entry.dirent,
                 rhs: rhs_entry.dirent,
             });
@@ -138,7 +143,7 @@ where
             let rhs_contents = read_to_string(rhs_entry.dirent.path())?;
             let changes = Changeset::new(&lhs_contents, &rhs_contents, "\n");
             if changes.distance != 0 {
-                return Err(PathCompareError::ContentsDiffer(format!(
+                return Err(DirCompareError::ContentsDiffer(format!(
                     "{:#?} != {:#?}:\n{}",
                     lhs_entry.dirent.path(),
                     rhs_entry.dirent.path(),
@@ -159,7 +164,8 @@ mod tests {
     fn compare_empty() -> Result<()> {
         let lhs = "testdata/lhs";
         let rhs = "testdata/rhs";
-        path_compare(&mut vec![].into_iter(), &lhs, &rhs)?;
+        let mut iter: std::vec::IntoIter<String> = vec![].into_iter();
+        directory_compare(&mut iter, &lhs, &rhs)?;
         Ok(())
     }
 
@@ -167,7 +173,7 @@ mod tests {
     fn compare_file_same_contents() -> Result<()> {
         let lhs = "testdata/lhs";
         let rhs = "testdata/rhs";
-        path_compare(&mut vec!["file1.txt"].into_iter(), &lhs, &rhs)?;
+        directory_compare(&mut vec!["file1.txt"].into_iter(), &lhs, &rhs)?;
         Ok(())
     }
 
@@ -175,7 +181,7 @@ mod tests {
     fn compare_multiple_files_same_contents() -> Result<()> {
         let lhs = "testdata/lhs";
         let rhs = "testdata/rhs";
-        path_compare(
+        directory_compare(
             &mut vec!["file1.txt", "file2.txt", "subdirectory/file3.txt"].into_iter(),
             &lhs,
             &rhs,
@@ -187,11 +193,11 @@ mod tests {
     fn compare_file_different_contents() -> Result<()> {
         let lhs = "testdata/lhs";
         let rhs = "testdata/rhs";
-        let result = path_compare(&mut vec!["differing.txt"].into_iter(), &lhs, &rhs);
+        let result = directory_compare(&mut vec!["differing.txt"].into_iter(), &lhs, &rhs);
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            PathCompareError::ContentsDiffer(_)
+            DirCompareError::ContentsDiffer(_)
         ));
         Ok(())
     }
@@ -200,11 +206,11 @@ mod tests {
     fn compare_directory_missing() -> Result<()> {
         let lhs = "testdata/lhs";
         let rhs = "testdata/rhs";
-        let result = path_compare(&mut vec!["lhs_only"].into_iter(), &lhs, &rhs);
+        let result = directory_compare(&mut vec!["lhs_only"].into_iter(), &lhs, &rhs);
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            PathCompareError::MissingEntry(_)
+            DirCompareError::MissingEntry(_)
         ));
         Ok(())
     }
@@ -213,11 +219,11 @@ mod tests {
     fn compare_file_differing_in_type() -> Result<()> {
         let lhs = "testdata/lhs";
         let rhs = "testdata/rhs";
-        let result = path_compare(&mut vec!["different_type"].into_iter(), &lhs, &rhs);
+        let result = directory_compare(&mut vec!["different_type"].into_iter(), &lhs, &rhs);
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            PathCompareError::EntryTypeMismatch { lhs: _, rhs: _ }
+            DirCompareError::EntryTypeMismatch { lhs: _, rhs: _ }
         ));
         Ok(())
     }
