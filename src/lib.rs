@@ -107,7 +107,7 @@ where
 /// Compares the selected contents of two directories.
 ///
 /// Checks all requested golden_paths within both directories.
-pub fn path_compare<P, I>(golden_paths: &mut I, lhs: &P, rhs: &P) -> Result<(), PathCompareError>
+pub fn path_compare<P, I>(golden_paths: &mut I, lhs: P, rhs: P) -> Result<(), PathCompareError>
 where
     P: AsRef<Path> + Ord,
     I: Iterator<Item = P>,
@@ -151,35 +151,29 @@ where
 mod tests {
     use super::*;
     use anyhow::Result;
-    use std::path::Path;
 
     #[test]
     fn compare_empty() -> Result<()> {
-        let lhs = Path::new("testdata/lhs");
-        let rhs = Path::new("testdata/rhs");
+        let lhs = "testdata/lhs";
+        let rhs = "testdata/rhs";
         path_compare(&mut vec![].into_iter(), &lhs, &rhs)?;
         Ok(())
     }
 
     #[test]
     fn compare_file_same_contents() -> Result<()> {
-        let lhs = Path::new("testdata/lhs");
-        let rhs = Path::new("testdata/rhs");
-        path_compare(&mut vec![Path::new("file1.txt")].into_iter(), &lhs, &rhs)?;
+        let lhs = "testdata/lhs";
+        let rhs = "testdata/rhs";
+        path_compare(&mut vec!["file1.txt"].into_iter(), &lhs, &rhs)?;
         Ok(())
     }
 
     #[test]
     fn compare_multiple_files_same_contents() -> Result<()> {
-        let lhs = Path::new("testdata/lhs");
-        let rhs = Path::new("testdata/rhs");
+        let lhs = "testdata/lhs";
+        let rhs = "testdata/rhs";
         path_compare(
-            &mut vec![
-                Path::new("file1.txt"),
-                Path::new("file2.txt"),
-                Path::new("subdirectory/file3.txt"),
-            ]
-            .into_iter(),
+            &mut vec!["file1.txt", "file2.txt", "subdirectory/file3.txt"].into_iter(),
             &lhs,
             &rhs,
         )?;
@@ -188,13 +182,9 @@ mod tests {
 
     #[test]
     fn compare_file_different_contents() -> Result<()> {
-        let lhs = Path::new("testdata/lhs");
-        let rhs = Path::new("testdata/rhs");
-        let result = path_compare(
-            &mut vec![Path::new("differing.txt")].into_iter(),
-            &lhs,
-            &rhs,
-        );
+        let lhs = "testdata/lhs";
+        let rhs = "testdata/rhs";
+        let result = path_compare(&mut vec!["differing.txt"].into_iter(), &lhs, &rhs);
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -205,9 +195,9 @@ mod tests {
 
     #[test]
     fn compare_directory_missing() -> Result<()> {
-        let lhs = Path::new("testdata/lhs");
-        let rhs = Path::new("testdata/rhs");
-        let result = path_compare(&mut vec![Path::new("lhs_only")].into_iter(), &lhs, &rhs);
+        let lhs = "testdata/lhs";
+        let rhs = "testdata/rhs";
+        let result = path_compare(&mut vec!["lhs_only"].into_iter(), &lhs, &rhs);
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -218,13 +208,9 @@ mod tests {
 
     #[test]
     fn compare_file_differing_in_type() -> Result<()> {
-        let lhs = Path::new("testdata/lhs");
-        let rhs = Path::new("testdata/rhs");
-        let result = path_compare(
-            &mut vec![Path::new("different_type")].into_iter(),
-            &lhs,
-            &rhs,
-        );
+        let lhs = "testdata/lhs";
+        let rhs = "testdata/rhs";
+        let result = path_compare(&mut vec!["different_type"].into_iter(), &lhs, &rhs);
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
