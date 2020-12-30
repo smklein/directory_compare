@@ -39,14 +39,19 @@ struct Entry {
 
 // Move `iter` forward until it returns an entry matching `golden`.
 // Returns the DirEntry which contains `golden`.
-fn advance_iter<I>(iter: &mut Peekable<I>, golden: &OsStr) -> Result<Entry, DirCompareError>
+fn advance_iter<P, I>(
+    source: P,
+    iter: &mut Peekable<I>,
+    golden: &OsStr,
+) -> Result<Entry, DirCompareError>
 where
+    P: AsRef<Path>,
     I: Iterator<Item = walkdir::Result<Entry>>,
 {
     loop {
-        let result = iter
-            .peek()
-            .ok_or_else(|| DirCompareError::MissingEntry(golden.to_owned()))?;
+        let result = iter.peek().ok_or_else(|| {
+            DirCompareError::MissingEntry(source.as_ref().join(golden.to_owned()).into_os_string())
+        })?;
 
         let item = match result {
             Ok(value) => value,
@@ -71,7 +76,9 @@ where
                 return Ok(item.clone());
             }
             Ordering::Greater => {
-                return Err(DirCompareError::MissingEntry(golden.to_owned()));
+                return Err(DirCompareError::MissingEntry(
+                    source.as_ref().join(golden.to_owned()).into_os_string(),
+                ));
             }
         }
     }
@@ -128,8 +135,8 @@ where
 
         // Ignore all non-requested paths, advancing the iterators
         // past unrelated content.
-        let lhs_entry = advance_iter(&mut lhs_iter, golden_os_str)?;
-        let rhs_entry = advance_iter(&mut rhs_iter, golden_os_str)?;
+        let lhs_entry = advance_iter(&lhs, &mut lhs_iter, golden_os_str)?;
+        let rhs_entry = advance_iter(&rhs, &mut rhs_iter, golden_os_str)?;
 
         if lhs_entry.dirent.file_type() != rhs_entry.dirent.file_type() {
             return Err(DirCompareError::EntryTypeMismatch {
