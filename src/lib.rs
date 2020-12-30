@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 use std::ffi::{OsStr, OsString};
 use std::fs::read_to_string;
 use std::iter::Peekable;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 use walkdir::{DirEntry, WalkDir};
 
@@ -27,13 +27,21 @@ pub enum PathCompareError {
     Io(#[from] std::io::Error),
 }
 
+#[derive(Clone, Debug)]
+struct Entry {
+    // Original DirEntry
+    dirent: DirEntry,
+    // Path relative to provided root directory.
+    path: PathBuf,
+}
+
 // Move `iter` forward until it returns an entry matching `golden`.
 // Returns the DirEntry which contains `golden`.
 //
 // TODO: Return &DirEntry instead of DirEntry clone.
-fn advance_iter<I>(iter: &mut Peekable<I>, golden: &OsStr) -> Result<DirEntry, PathCompareError>
+fn advance_iter<I>(iter: &mut Peekable<I>, golden: &OsStr) -> Result<Entry, PathCompareError>
 where
-    I: Iterator<Item = walkdir::Result<DirEntry>>,
+    I: Iterator<Item = walkdir::Result<Entry>>,
 {
     loop {
         let result = iter
@@ -57,12 +65,10 @@ where
 
         println!(
             "advance_iter considering: {:#?} vs {:#?}",
-            item.path(),
-            golden
+            item.path, golden
         );
 
-        // XXX Don't we want to compare the PATHS, not the file name?
-        match item.file_name().cmp(&golden) {
+        match item.path.as_path().cmp(Path::new(golden)) {
             Ordering::Less => {
                 println!("  LESS - Not yet!");
                 let _ = iter.next();
@@ -79,12 +85,33 @@ where
     }
 }
 
-fn compare_by_file_name(a: &DirEntry, b: &DirEntry) -> Ordering {
-    a.file_name().cmp(b.file_name())
+fn compare_by_path(a: &DirEntry, b: &DirEntry) -> Ordering {
+    a.path().cmp(b.path())
 }
 
-fn sorted_walkdir<P: AsRef<Path>>(p: &P) -> WalkDir {
-    WalkDir::new(p).sort_by(compare_by_file_name)
+fn sorted_walkdir<P>(p: &P) -> impl Iterator<Item = walkdir::Result<Entry>> + '_
+where
+    P: AsRef<Path>,
+{
+    let iter = WalkDir::new(p)
+        // Avoid returning the directory itself.
+        .min_depth(1)
+        // Return consistent order.
+        .sort_by(compare_by_path)
+        .into_iter()
+        // Strip the provided prefix of the path; we want visibility
+        // into the paths of files *relative* to the input path.
+        .map(move |item| {
+            item.map(|entry| {
+                let path = entry.path().strip_prefix(p).unwrap().to_path_buf();
+                Entry {
+                    dirent: entry,
+                    path,
+                }
+            })
+        });
+
+    iter
 }
 
 /// Compares the selected contents of two directories.
@@ -98,16 +125,10 @@ where
     // Stable ordering is necessary for the following comparison
     // algorithm.
     let mut golden_paths = sorted(golden_paths);
-    let mut lhs_iter = sorted_walkdir(&lhs).into_iter().peekable();
-    let mut rhs_iter = sorted_walkdir(&rhs).into_iter().peekable();
+    let mut lhs_iter = sorted_walkdir(&lhs).peekable();
+    let mut rhs_iter = sorted_walkdir(&rhs).peekable();
 
-    // XXX this skips the first entry (directory name), maybe drop it?
-    lhs_iter.next();
-    rhs_iter.next();
-
-    let mut expected = golden_paths.next();
-
-    while let Some(golden) = expected {
+    while let Some(golden) = golden_paths.next() {
         let golden_os_str = golden.as_ref().as_os_str();
         println!(">>> GOLDEN: {:#?}", golden_os_str);
         println!("Checking for LHS file...");
@@ -115,26 +136,28 @@ where
         println!("Checking for RHS file...");
         let rhs_entry = advance_iter(&mut rhs_iter, golden_os_str)?;
 
-        if lhs_entry.file_type() != rhs_entry.file_type() {
+        if lhs_entry.dirent.file_type() != rhs_entry.dirent.file_type() {
             return Err(PathCompareError::EntryTypeMismatch {
-                lhs: lhs_entry,
-                rhs: rhs_entry,
+                lhs: lhs_entry.dirent,
+                rhs: rhs_entry.dirent,
             });
         }
 
-        if lhs_entry.file_type().is_file() {
+        if lhs_entry.dirent.file_type().is_file() {
             println!("Comparing contents...");
-            let lhs_contents = read_to_string(lhs_entry.path())?;
-            let rhs_contents = read_to_string(rhs_entry.path())?;
+            // TODO: check these paths
+            let lhs_contents = read_to_string(lhs_entry.dirent.path())?;
+            let rhs_contents = read_to_string(rhs_entry.dirent.path())?;
             let changes = Changeset::new(&lhs_contents, &rhs_contents, "\n");
             if changes.distance != 0 {
                 return Err(PathCompareError::ContentsDiffer(format!(
-                    "{:#?} differs: {}",
-                    golden_os_str, changes
+                    "{:#?} != {:#?}:\n{}",
+                    lhs_entry.dirent.path(),
+                    rhs_entry.dirent.path(),
+                    changes
                 )));
             }
         }
-        expected = golden_paths.next();
     }
     Ok(())
 }
@@ -178,8 +201,50 @@ mod tests {
         Ok(())
     }
 
-    // TODO: test multiple files
-    // TODO: test directory
-    // TODO: test when files are different
-    // TODO: compare modes
+    #[test]
+    fn compare_file_different_contents() -> Result<()> {
+        let lhs = Path::new("testdata/lhs");
+        let rhs = Path::new("testdata/rhs");
+        let result = path_compare(
+            &mut vec![Path::new("differing.txt")].into_iter(),
+            &lhs,
+            &rhs,
+        );
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PathCompareError::ContentsDiffer(_)
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn compare_directory_missing() -> Result<()> {
+        let lhs = Path::new("testdata/lhs");
+        let rhs = Path::new("testdata/rhs");
+        let result = path_compare(&mut vec![Path::new("lhs_only")].into_iter(), &lhs, &rhs);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PathCompareError::MissingEntry(_)
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn compare_file_differing_in_type() -> Result<()> {
+        let lhs = Path::new("testdata/lhs");
+        let rhs = Path::new("testdata/rhs");
+        let result = path_compare(
+            &mut vec![Path::new("different_type")].into_iter(),
+            &lhs,
+            &rhs,
+        );
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PathCompareError::EntryTypeMismatch { lhs: _, rhs: _ }
+        ));
+        Ok(())
+    }
 }
