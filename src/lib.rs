@@ -27,6 +27,8 @@ pub enum PathCompareError {
     Io(#[from] std::io::Error),
 }
 
+// A wrapper class, containing both the original DirEntry (directly
+// returned from Walkdir) and a path relative to the root directory.
 #[derive(Clone, Debug)]
 struct Entry {
     // Original DirEntry
@@ -37,8 +39,6 @@ struct Entry {
 
 // Move `iter` forward until it returns an entry matching `golden`.
 // Returns the DirEntry which contains `golden`.
-//
-// TODO: Return &DirEntry instead of DirEntry clone.
 fn advance_iter<I>(iter: &mut Peekable<I>, golden: &OsStr) -> Result<Entry, PathCompareError>
 where
     I: Iterator<Item = walkdir::Result<Entry>>,
@@ -63,22 +63,14 @@ where
             }
         };
 
-        println!(
-            "advance_iter considering: {:#?} vs {:#?}",
-            item.path, golden
-        );
-
         match item.path.as_path().cmp(Path::new(golden)) {
             Ordering::Less => {
-                println!("  LESS - Not yet!");
                 let _ = iter.next();
             }
             Ordering::Equal => {
-                println!("  EQ - FOUND IT");
                 return Ok(item.clone());
             }
             Ordering::Greater => {
-                println!("  GREATER - Too far!");
                 return Err(PathCompareError::MissingEntry(golden.to_owned()));
             }
         }
@@ -93,7 +85,7 @@ fn sorted_walkdir<P>(p: &P) -> impl Iterator<Item = walkdir::Result<Entry>> + '_
 where
     P: AsRef<Path>,
 {
-    let iter = WalkDir::new(p)
+    WalkDir::new(p)
         // Avoid returning the directory itself.
         .min_depth(1)
         // Return consistent order.
@@ -109,9 +101,7 @@ where
                     path,
                 }
             })
-        });
-
-    iter
+        })
 }
 
 /// Compares the selected contents of two directories.
@@ -124,16 +114,13 @@ where
 {
     // Stable ordering is necessary for the following comparison
     // algorithm.
-    let mut golden_paths = sorted(golden_paths);
+    let golden_paths = sorted(golden_paths);
     let mut lhs_iter = sorted_walkdir(&lhs).peekable();
     let mut rhs_iter = sorted_walkdir(&rhs).peekable();
 
-    while let Some(golden) = golden_paths.next() {
+    for golden in golden_paths {
         let golden_os_str = golden.as_ref().as_os_str();
-        println!(">>> GOLDEN: {:#?}", golden_os_str);
-        println!("Checking for LHS file...");
         let lhs_entry = advance_iter(&mut lhs_iter, golden_os_str)?;
-        println!("Checking for RHS file...");
         let rhs_entry = advance_iter(&mut rhs_iter, golden_os_str)?;
 
         if lhs_entry.dirent.file_type() != rhs_entry.dirent.file_type() {
@@ -144,8 +131,6 @@ where
         }
 
         if lhs_entry.dirent.file_type().is_file() {
-            println!("Comparing contents...");
-            // TODO: check these paths
             let lhs_contents = read_to_string(lhs_entry.dirent.path())?;
             let rhs_contents = read_to_string(rhs_entry.dirent.path())?;
             let changes = Changeset::new(&lhs_contents, &rhs_contents, "\n");
