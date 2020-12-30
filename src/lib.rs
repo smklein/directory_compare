@@ -112,16 +112,35 @@ where
 }
 
 /// Compares the selected contents of two directories.
-///
 /// Checks all requested golden_paths within both directories.
-pub fn directory_compare<P, I, P2>(
+///
+/// The acronynms "lhs" and "rhs" are used as shorthands
+/// for "{Left, Right} Hand Side".
+///
+/// ```
+/// use directory_compare::directory_compare;
+/// use tempdir::TempDir;
+/// let lhs = TempDir::new("first_directory").unwrap();
+/// let rhs = TempDir::new("second_directory").unwrap();
+///
+/// std::fs::write(lhs.path().join("my-file.txt"), "contents").unwrap();
+/// std::fs::write(rhs.path().join("my-file.txt"), "contents").unwrap();
+///
+/// directory_compare(
+///     &mut vec!["my-file.txt"].into_iter(),
+///     lhs.path(),
+///     rhs.path()
+/// ).unwrap();
+/// ```
+pub fn directory_compare<P, I, Q, R>(
     golden_paths: &mut I,
-    lhs: P2,
-    rhs: P2,
+    lhs: Q,
+    rhs: R,
 ) -> Result<(), DirCompareError>
 where
     P: AsRef<Path> + Ord,
-    P2: AsRef<Path>,
+    Q: AsRef<Path>,
+    R: AsRef<Path>,
     I: Iterator<Item = P>,
 {
     // Stable ordering is necessary for the following comparison
