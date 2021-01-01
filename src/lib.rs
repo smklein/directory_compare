@@ -2,9 +2,9 @@ use difference::Changeset;
 use itertools::sorted;
 use std::cmp::Ordering;
 use std::ffi::{OsStr, OsString};
-use std::fs::read_to_string;
 use std::iter::Peekable;
 use std::path::{Path, PathBuf};
+use std::str::from_utf8;
 use thiserror::Error;
 use walkdir::{DirEntry, WalkDir};
 
@@ -174,16 +174,39 @@ where
         }
 
         if lhs_entry.dirent.file_type().is_file() {
-            let lhs_contents = read_to_string(lhs_entry.dirent.path())?;
-            let rhs_contents = read_to_string(rhs_entry.dirent.path())?;
-            let changes = Changeset::new(&lhs_contents, &rhs_contents, "\n");
-            if changes.distance != 0 {
-                return Err(DirCompareError::ContentsDiffer(format!(
-                    "{:#?} != {:#?}:\n{}",
-                    lhs_entry.dirent.path(),
-                    rhs_entry.dirent.path(),
-                    changes
-                )));
+            let lhs_contents = std::fs::read(lhs_entry.dirent.path())?;
+            let rhs_contents = std::fs::read(rhs_entry.dirent.path())?;
+
+            match (from_utf8(&lhs_contents), from_utf8(&rhs_contents)) {
+                // Use a prettier, string-based diff for files which
+                // are valid UTF-8.
+                (Ok(lhs_str), Ok(rhs_str)) => {
+                    let changes = Changeset::new(&lhs_str, &rhs_str, "\n");
+                    if changes.distance != 0 {
+                        return Err(DirCompareError::ContentsDiffer(format!(
+                            "{:#?} != {:#?}:\n{}",
+                            lhs_entry.dirent.path(),
+                            rhs_entry.dirent.path(),
+                            changes
+                        )));
+                    }
+                }
+                // For files which are invalid UTF-8, revert to a full hex-based
+                // diff.
+                //
+                // TODO: We could try to only show the portion of the contents
+                // which differ, rather than a full dump.
+                (_, _) => {
+                    if lhs_contents != rhs_contents {
+                        return Err(DirCompareError::ContentsDiffer(format!(
+                            "{:#?} != {:#?}:\n{}\n{}",
+                            lhs_entry.dirent.path(),
+                            rhs_entry.dirent.path(),
+                            pretty_hex::pretty_hex(&lhs_contents),
+                            pretty_hex::pretty_hex(&rhs_contents),
+                        )));
+                    }
+                }
             }
         }
     }
@@ -259,6 +282,19 @@ mod tests {
         assert!(matches!(
             result.unwrap_err(),
             DirCompareError::EntryTypeMismatch { lhs: _, rhs: _ }
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn compare_differing_binary() -> Result<()> {
+        let lhs = "testdata/lhs";
+        let rhs = "testdata/rhs";
+        let result = directory_compare(&mut vec!["binary"].into_iter(), &lhs, &rhs);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            DirCompareError::ContentsDiffer(_),
         ));
         Ok(())
     }
